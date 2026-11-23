@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinmodel"
+version = "0.1.0"
+description = "Sinusoidal partial sound modeler: time-varying frequency/amplitude/phase tracking, resynthesis and residual separation"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.6",
+    "soundfile>=0.12",
+    "PySide6>=6.5",
+]
+
+[project.scripts]
+sinmodel-gui = "sinmodel.gui:main"
+sinmodel = "sinmodel.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sinmodel*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
