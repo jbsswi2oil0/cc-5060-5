@@ -163,7 +163,10 @@ def test_crossing_is_flagged_as_ambiguous():
     x, truth = make_test_signal(crossing=True, noise_std=0.002)
     model = SinusoidalModel.fit(x, FS)
     assert len(model.ambiguities) >= 1
-    assert all(a.resolved in (0, 1) for a in model.ambiguities)
+    # Every ambiguous junction retains more than one full identity hypothesis
+    # and none of them duplicates a fragment.
+    assert all(len(jn.hypotheses) >= 2 for jn in model.ambiguities)
+    assert model.tracking.ghost_problems == []
 
 
 def test_no_false_ambiguity_in_clean_partials():

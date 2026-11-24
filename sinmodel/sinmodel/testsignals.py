@@ -83,3 +83,124 @@ def make_test_signal(
         x += p.amplitude(t) * np.cos(p.phase(t))
     x += noise_std * rng.standard_normal(len(t))
     return x, partials
+
+
+@dataclass
+class LinearPartial:
+    """A partial with a linear frequency glide and constant amplitude."""
+
+    name: str
+    f_start: float
+    f_end: float
+    amp: float
+    phase0: float = 0.0
+    duration: float = 1.5
+
+    def frequency(self, t: np.ndarray) -> np.ndarray:
+        return self.f_start + (self.f_end - self.f_start) * (t / self.duration)
+
+    def phase(self, t: np.ndarray) -> np.ndarray:
+        glide = (self.f_end - self.f_start) / (2.0 * self.duration)
+        return self.phase0 + 2.0 * np.pi * (
+            self.f_start * t + glide * t**2
+        )
+
+    def amplitude(self, t: np.ndarray) -> np.ndarray:
+        return np.full_like(t, self.amp)
+
+
+def make_crossing_glissando(
+    fs: int = 16000,
+    duration: float = 1.5,
+    noise_std: float = 0.002,
+    weak_amp: float = 0.4,
+) -> tuple[np.ndarray, list[LinearPartial]]:
+    """Two gliding partials that cross and swap frequency order.
+
+    The steady/rising pair is the canonical merge: at the crossing the Hann
+    main lobe resolves only one peak, so a tracker must cut both trajectories
+    there and reconnect them by motion, not by frequency order.  ``weak_amp``
+    lower than the steady amplitude produces the masking variant.
+    """
+    t = np.arange(int(fs * duration)) / fs
+    partials = [
+        LinearPartial("steady", 500.0, 500.0, 0.40, phase0=0.0, duration=duration),
+        LinearPartial("riser", 380.0, 620.0, weak_amp, phase0=1.2, duration=duration),
+    ]
+    x = np.zeros_like(t)
+    rng = np.random.default_rng(11)
+    for p in partials:
+        x += p.amplitude(t) * np.cos(p.phase(t))
+    x += noise_std * rng.standard_normal(len(t))
+    return x, partials
+
+
+def make_masking_signal(
+    fs: int = 16000,
+    duration: float = 1.5,
+    noise_std: float = 0.002,
+    strong_amp: float = 0.45,
+    weak_amp: float = 0.02,
+) -> tuple[np.ndarray, list[LinearPartial]]:
+    """A weak riser sweeping underneath a strong steady partial.
+
+    While the weak partial lies inside the strong partial's main lobe it is
+    masked completely; the tracker observes a single peak.  Identity must still
+    be continuous across that blind region, and the residual must show the
+    energy the model did not capture rather than a spurious split.
+    """
+    t = np.arange(int(fs * duration)) / fs
+    partials = [
+        LinearPartial("strong", 520.0, 520.0, strong_amp, phase0=0.0, duration=duration),
+        LinearPartial(
+            "weak_riser", 440.0, 600.0, weak_amp, phase0=2.1, duration=duration
+        ),
+    ]
+    x = np.zeros_like(t)
+    rng = np.random.default_rng(17)
+    for p in partials:
+        x += p.amplitude(t) * np.cos(p.phase(t))
+    x += noise_std * rng.standard_normal(len(t))
+    return x, partials
+
+
+def make_intermittent_signal(
+    fs: int = 16000,
+    duration: float = 1.5,
+    noise_std: float = 0.002,
+    brief_gap: tuple[float, float] = (0.50, 0.60),
+    long_gap: tuple[float, float] = (0.95, 1.28),
+) -> tuple[np.ndarray, list[GroundTruthPartial], dict[str, tuple[float, float]]]:
+    """A steady reference plus a partial that stops and restarts.
+
+    The first dropout is short enough to be a missed detection: it may be
+    bridged by interpolation.  The second is a genuine silence: the partial
+    must end and a new one begin, and no sound may be invented inside it.
+    Returns the signal, the ground-truth partials and the gaps in seconds.
+    """
+    t = np.arange(int(fs * duration)) / fs
+    ref = GroundTruthPartial("reference", 300.0, 0.35, 0.35, 0.0, 0.0)
+    voiced = GroundTruthPartial("gated", 720.0, 0.3, 0.3, 0.0, 0.0)
+
+    # Raised-cosine gate that fades over 20 ms at each edge.
+    fade = 0.02
+
+    def gate(lo: float, hi: float) -> np.ndarray:
+        g = np.zeros_like(t)
+        g[(t >= lo) & (t <= hi)] = 1.0
+        rise = (t >= lo) & (t < lo + fade)
+        fall = (t > hi - fade) & (t <= hi)
+        g[rise] = 0.5 - 0.5 * np.cos(np.pi * (t[rise] - lo) / fade)
+        g[fall] = 0.5 - 0.5 * np.cos(np.pi * (hi - t[fall]) / fade)
+        return g
+
+    on = np.ones_like(t)
+    on[(t >= brief_gap[0]) & (t <= brief_gap[1])] = 0.0
+    on[(t >= long_gap[0]) & (t <= long_gap[1])] = 0.0
+    envelope = gate(0.0, duration) * on
+
+    x = ref.amplitude(t) * np.cos(ref.phase(t))
+    x += envelope * voiced.amplitude(t) * np.cos(voiced.phase(t))
+    rng = np.random.default_rng(23)
+    x += noise_std * rng.standard_normal(len(t))
+    return x, [ref, voiced], {"brief_gap": brief_gap, "long_gap": long_gap}
